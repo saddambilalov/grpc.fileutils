@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "FileUtilsClient": {
+      "commandName": "Project",
+      "commandLineArgs": "-- --file-path=C:\\Users\\sadda\\Downloads\\csv.csv"
+    }
+  }
+}

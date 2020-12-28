@@ -1,8 +1,8 @@
 using System;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Cocona;
-using Cocona.Help;
 using Google.Protobuf;
 using Grpc.Core;
 using GrpcProto;
@@ -17,39 +17,72 @@ namespace FileUtilsClient
         public async Task FileUpLoadAsync([Option(Description = "Path for uploading the file")] string filePath)
         {
             Channel channel = new Channel("127.0.0.1:30051", ChannelCredentials.Insecure);
+            var cts = new CancellationTokenSource();
 
-            var fileName = Path.GetFileName(filePath);
-
-            var client = new GrpcService.GrpcServiceClient(channel);
-
-            using (var stream = client.FileUpLoad())
+            try
             {
-                await stream.RequestStream.WriteAsync(new FileUploadRequest
+                var fileName = Path.GetFileName(filePath);
+
+                var client = new GrpcService.GrpcServiceClient(channel);
+
+                //using (var stream = client.FileUpLoad(cancellationToken: cts.Token))
+                //{
+                //    await stream.RequestStream.WriteAsync(new FileUploadRequest
+                //    {
+                //        FileName = fileName
+                //    });
+
+                //    using FileStream inputStream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+                //    int chunkSize = 512 * 1024; //500 KB
+                //    byte[] bytes = new byte[chunkSize];
+                //    int numberOfChunks = 1;
+
+                //    int size;
+                //    while ((size = inputStream.Read(bytes)) > 0)
+                //    {
+                //        var chunk = ByteString.CopyFrom(bytes, 0, size);
+
+                //        await stream.RequestStream.WriteAsync(new FileUploadRequest
+                //        {
+                //            Chunk = chunk
+                //        });
+
+                //        await Task.Delay(millisecondsDelay: 1);
+                //        numberOfChunks++;
+                //    }
+
+                //    Console.WriteLine($"The number of chunks sent: {numberOfChunks}");
+                //    await stream.RequestStream.CompleteAsync();
+                //}
+
+                using AsyncServerStreamingCall<DataChunk> streaming = client.FileDownload(new FileDownloadRequest
                 {
                     FileName = fileName
-                });
-
-                using FileStream inputStream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
-                int chunkSize = 512 * 1024; //500 KB
-                byte[] bytes = new byte[chunkSize];
-                int numberOfChunks = 1;
-
-                int size;
-                while ((size = inputStream.Read(bytes)) > 0)
+                }, cancellationToken: cts.Token);
+                try
                 {
-                    var chunk = ByteString.CopyFrom(bytes, 0, size);
+                    using var memoryStream = new MemoryStream();
 
-                    await stream.RequestStream.WriteAsync(new FileUploadRequest
+                    while (await streaming.ResponseStream.MoveNext(cancellationToken: cts.Token))
                     {
-                        Chunk = chunk
-                    });
+                        var dataChunk = streaming.ResponseStream.Current;
+                        var chunk = dataChunk.ToByteArray();
+                        await memoryStream.WriteAsync(chunk);
+                    }
+                    memoryStream.Seek(0, SeekOrigin.Begin);
 
-                    await Task.Delay(TimeSpan.FromMilliseconds(10));
-                    numberOfChunks++;
+                    using var fs = new FileStream(fileName, FileMode.Create, FileAccess.Write);
+                    await memoryStream.CopyToAsync(fs);
                 }
-
-                Console.WriteLine($"The number of chunks sent: {numberOfChunks}");
-                await stream.RequestStream.CompleteAsync();
+                catch (RpcException ex) when (ex.StatusCode == StatusCode.Cancelled)
+                {
+                    Console.WriteLine("Stream cancelled.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine(ex.Message);
+                cts.Cancel();
             }
 
             await channel.ShutdownAsync();

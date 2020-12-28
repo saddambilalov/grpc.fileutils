@@ -6,8 +6,19 @@ option csharp_namespace = "GrpcProto";
 
 service GrpcService {
     rpc FileUpLoad (stream FileUploadRequest) returns(FileUploadResponse);
+
+    rpc FileDownload(FileDownloadRequest) returns(stream DataChunk);
 }
- 
+
+message FileDownloadRequest {
+  string fileName = 1;
+}
+
+message DataChunk {
+    bytes data = 1;
+    int64 size = 2;
+}
+
 message FileUploadRequest {
   oneof request {
       string file_name = 1;
